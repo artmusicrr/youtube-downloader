@@ -1,10 +1,15 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.processDownloadJob = void 0;
 const child_process_1 = require("child_process");
 const database_1 = require("database");
 const fs_1 = require("fs");
 const fs_2 = require("fs");
+const path_1 = __importDefault(require("path"));
+const ffmpeg_static_1 = __importDefault(require("ffmpeg-static"));
 const LOCAL_YT_DLP = '/home/reg/projects/youtube-downloader/bin/yt-dlp';
 const SYSTEM_YT_DLP = '/usr/bin/yt-dlp';
 const BUNDLED_YT_DLP = `${__dirname}/../../../node_modules/yt-dlp-exec/bin/yt-dlp`;
@@ -56,13 +61,41 @@ const processDownloadJob = async (payload, channel) => {
         args.push('--cookies', cookiesPath);
     if (proxy)
         args.push('--proxy', proxy);
-    const LOCAL_FFMPEG = '/home/reg/projects/youtube-downloader/bin/ffmpeg';
-    if ((0, fs_1.existsSync)(LOCAL_FFMPEG)) {
-        args.push('--ffmpeg-location', '/home/reg/projects/youtube-downloader/bin');
+    // Detect ffmpeg location: prefer packaged `ffmpeg-static`, then repo `bin/`, then system
+    let ffmpegLocationDir;
+    const ffmpegStaticPath = ffmpeg_static_1.default;
+    if (ffmpegStaticPath && (0, fs_1.existsSync)(ffmpegStaticPath)) {
+        ffmpegLocationDir = path_1.default.dirname(ffmpegStaticPath);
     }
+    else {
+        const projectRootLocal = path_1.default.join(__dirname, '..', '..', '..', 'bin', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+        if ((0, fs_1.existsSync)(projectRootLocal)) {
+            ffmpegLocationDir = path_1.default.dirname(projectRootLocal);
+        }
+        else {
+            try {
+                // try to resolve system ffmpeg in PATH
+                // eslint-disable-next-line @typescript-eslint/no-var-requires
+                const which = require('which');
+                const systemFfmpeg = which.sync('ffmpeg');
+                if (systemFfmpeg && (0, fs_1.existsSync)(systemFfmpeg))
+                    ffmpegLocationDir = path_1.default.dirname(systemFfmpeg);
+            }
+            catch { }
+        }
+    }
+    if (ffmpegLocationDir)
+        args.push('--ffmpeg-location', ffmpegLocationDir);
     console.log(`[worker] Running: ${YT_DLP_BIN} ${args.join(' ')}`);
     const childEnv = { ...process.env };
-    childEnv.PATH = `/home/reg/projects/youtube-downloader/bin:${childEnv.PATH || ''}`;
+    if (ffmpegLocationDir) {
+        childEnv.PATH = `${ffmpegLocationDir}${path_1.default.delimiter}${childEnv.PATH || ''}`;
+    }
+    else {
+        // keep existing behavior of including repo bin as fallback
+        const fallbackBin = path_1.default.join(__dirname, '..', '..', '..', 'bin');
+        childEnv.PATH = `${fallbackBin}${path_1.default.delimiter}${childEnv.PATH || ''}`;
+    }
     const proc = (0, child_process_1.spawn)(YT_DLP_BIN, args, { env: childEnv });
     // yt-dlp sends progress to stderr in newer versions, stdout in some older versions
     const handleOutput = (data) => {
