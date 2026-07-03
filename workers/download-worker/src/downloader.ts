@@ -3,6 +3,8 @@ import { Channel } from 'amqplib';
 import { prisma } from 'database';
 import { existsSync } from 'fs';
 import { mkdirSync } from 'fs';
+import path from 'path';
+import ffmpegStatic from 'ffmpeg-static';
 
 const LOCAL_YT_DLP = '/home/reg/projects/youtube-downloader/bin/yt-dlp';
 const SYSTEM_YT_DLP = '/usr/bin/yt-dlp';
@@ -60,15 +62,39 @@ export const processDownloadJob = async (payload: any, channel: Channel) => {
   if (cookiesPath && existsSync(cookiesPath)) args.push('--cookies', cookiesPath);
   if (proxy) args.push('--proxy', proxy);
 
-  const LOCAL_FFMPEG = '/home/reg/projects/youtube-downloader/bin/ffmpeg';
-  if (existsSync(LOCAL_FFMPEG)) {
-    args.push('--ffmpeg-location', '/home/reg/projects/youtube-downloader/bin');
+  // Detect ffmpeg location: prefer packaged `ffmpeg-static`, then repo `bin/`, then system
+  let ffmpegLocationDir: string | undefined;
+
+  const ffmpegStaticPath: string | undefined = (ffmpegStatic as unknown) as string | undefined;
+  if (ffmpegStaticPath && existsSync(ffmpegStaticPath)) {
+    ffmpegLocationDir = path.dirname(ffmpegStaticPath);
+  } else {
+    const projectRootLocal = path.join(__dirname, '..', '..', '..', 'bin', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+    if (existsSync(projectRootLocal)) {
+      ffmpegLocationDir = path.dirname(projectRootLocal);
+    } else {
+      try {
+        // try to resolve system ffmpeg in PATH
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const which = require('which');
+        const systemFfmpeg = which.sync('ffmpeg');
+        if (systemFfmpeg && existsSync(systemFfmpeg)) ffmpegLocationDir = path.dirname(systemFfmpeg);
+      } catch {}
+    }
   }
+
+  if (ffmpegLocationDir) args.push('--ffmpeg-location', ffmpegLocationDir);
 
   console.log(`[worker] Running: ${YT_DLP_BIN} ${args.join(' ')}`);
 
-  const childEnv = { ...process.env };
-  childEnv.PATH = `/home/reg/projects/youtube-downloader/bin:${childEnv.PATH || ''}`;
+  const childEnv: any = { ...process.env };
+  if (ffmpegLocationDir) {
+    childEnv.PATH = `${ffmpegLocationDir}${path.delimiter}${childEnv.PATH || ''}`;
+  } else {
+    // keep existing behavior of including repo bin as fallback
+    const fallbackBin = path.join(__dirname, '..', '..', '..', 'bin');
+    childEnv.PATH = `${fallbackBin}${path.delimiter}${childEnv.PATH || ''}`;
+  }
 
   const proc = spawn(YT_DLP_BIN, args, { env: childEnv });
 

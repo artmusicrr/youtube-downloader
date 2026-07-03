@@ -1,1 +1,9 @@
 node_modules
+
+# Ignore ffmpeg/ffprobe binaries but keep directory placeholders
+bin/linux/*
+bin/macos/*
+bin/windows/*
+!bin/linux/.gitkeep
+!bin/macos/.gitkeep
+!bin/windows/.gitkeep
