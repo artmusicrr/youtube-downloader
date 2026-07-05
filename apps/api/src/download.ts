@@ -79,7 +79,7 @@ export const clearQueueHandler = async (req: Request, res: Response): Promise<vo
   try {
     const { userId } = req.params;
     const { count } = await prisma.download.deleteMany({
-      where: { userId, status: { in: ['error', 'completed'] } },
+      where: { userId },
     });
     res.json({ deleted: count });
   } catch (error) {
